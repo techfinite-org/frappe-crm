@@ -24,49 +24,71 @@
 
     <Button variant="ghost" icon="x" @click="reply = {}" />
   </div>
-  <div class="flex items-end gap-2 px-3 py-2.5 sm:px-10" v-bind="$attrs">
-    <div class="flex h-8 items-center gap-2">
-      <FileUploader @success="(file) => uploadFile(file)">
-        <template #default="{ openFileSelector }">
-          <div class="flex items-center space-x-2">
-            <Dropdown :options="uploadOptions(openFileSelector)">
-              <FeatherIcon
-                name="plus"
-                class="size-4.5 cursor-pointer text-ink-gray-5"
-              />
-            </Dropdown>
-          </div>
-        </template>
-      </FileUploader>
-      <IconPicker
-        v-slot="{ togglePopover }"
-        v-model="emoji"
-        @update:modelValue="
-          () => {
-            content += emoji
-            $refs.textareaRef.el.focus()
-            capture('whatsapp_emoji_added')
-          }
-        "
-      >
-        <SmileIcon
-          class="flex size-4.5 cursor-pointer rounded-sm text-xl leading-none text-ink-gray-4"
-          @click="togglePopover"
-        />
-      </IconPicker>
-    </div>
-    <Textarea
+<div class="flex items-end gap-2 px-4 py-2.5 w-full" v-bind="$attrs">
+
+  <div class="flex flex-1 items-center rounded-[8px] border border-gray-300 bg-white px-3 py-2.5 focus-within:border-green-400 focus-within:ring-1 focus-within:ring-green-400">
+
+    <!-- Emoji -->
+    <IconPicker
+      v-slot="{ togglePopover }"
+      v-model="emoji"
+      @update:modelValue="
+        () => {
+          content += emoji
+          $refs.textareaRef.focus()
+          capture('whatsapp_emoji_added')
+        }
+      "
+    >
+      <SmileIcon
+        class="mr-2 flex size-5 shrink-0 cursor-pointer text-ink-gray-4"
+        @click="togglePopover"
+      />
+    </IconPicker>
+
+    <!-- Textarea -->
+    <textarea
       ref="textareaRef"
       v-model="content"
-      type="textarea"
-      class="min-h-8 w-full"
-      :rows="rows"
-      :placeholder="placeholder"
-      @focus="rows = 6"
-      @blur="rows = 1"
-      @keydown.enter.stop="(e) => sendTextMessage(e)"
+      rows="1"
+      :placeholder="__('Type a message')"
+      class="max-h-24 flex-1 resize-none overflow-y-auto border-0 bg-transparent text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-0"
+      style="height: 24px; overflow-y: hidden; line-height: 20px; padding: 0; margin: 0;"
+      @input="autoResize"
     />
+
+    <!-- Attachment -->
+    <FileUploader @success="(file) => uploadFile(file)">
+      <template #default="{ openFileSelector }">
+        <Dropdown :options="uploadOptions(openFileSelector)">
+          <FeatherIcon
+            name="plus"
+            class="ml-2 size-5 shrink-0 cursor-pointer text-ink-gray-5"
+          />
+        </Dropdown>
+      </template>
+    </FileUploader>
+
   </div>
+
+  <!-- Send Button -->
+  <button
+    :disabled="!content?.trim()"
+    class="flex h-12 w-12 shrink-0 self-center items-center justify-center rounded-full bg-green-500 text-white transition hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+    type="button"
+    @click="sendWhatsAppMessage"
+  >
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      class="h-6 w-6 translate-x-px"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <path d="M3.4 20.4L20.85 12 3.4 3.6v6.53L15.87 12 3.4 13.87v6.53z" />
+    </svg>
+  </button>
+
+</div>
 </template>
 
 <script setup>
@@ -102,7 +124,7 @@ const placeholder = ref(__('Type your message here...'))
 const fileType = ref('')
 
 function show() {
-  nextTick(() => textareaRef.value.el.focus())
+  nextTick(() => textareaRef.value?.focus())
 }
 
 function uploadFile(file) {
@@ -110,6 +132,16 @@ function uploadFile(file) {
   whatsapp.value.content_type = fileType.value
   sendWhatsAppMessage()
   capture('whatsapp_upload_file')
+}
+
+const autoResize = (e) => {
+
+  const el = e.target
+
+  el.style.height = '24px'
+  const newH = Math.min(el.scrollHeight, 96)
+  el.style.height = `${newH}px`
+  el.style.overflowY = el.scrollHeight > 96 ? 'auto' : 'hidden'
 }
 
 function sendTextMessage(event) {
@@ -121,6 +153,9 @@ function sendTextMessage(event) {
 }
 
 async function sendWhatsAppMessage() {
+
+  if (!content.value?.trim()) return
+
   let args = {
     reference_doctype: props.doctype,
     reference_name: doc.value.name,
@@ -130,20 +165,36 @@ async function sendWhatsAppMessage() {
     reply_to: reply.value?.name || '',
     content_type: whatsapp.value.content_type,
   }
-  content.value = ''
-  fileType.value = ''
-  whatsapp.value.attach = ''
-  whatsapp.value.content_type = 'text'
-  reply.value = {}
-  createResource({
-    url: 'crm.api.whatsapp.create_whatsapp_message',
-    params: args,
-    auto: true,
-    onSuccess: () => whatsapp.value.reload(),
-    onError: (error) => {
-      toast.error(error.messages?.[0] || __('Failed to send WhatsApp message'))
-    },
-  })
+
+  try {
+
+    await createResource({
+      url: 'crm.api.whatsapp.create_whatsapp_message',
+      params: args,
+    }).submit()
+
+    content.value = ''
+    fileType.value = ''
+    whatsapp.value.attach = ''
+    whatsapp.value.content_type = 'text'
+    reply.value = {}
+
+    whatsapp.value.reload()
+
+    nextTick(() => {
+      if (textareaRef.value) {
+        textareaRef.value.style.height = '24px'
+        textareaRef.value.style.overflowY = 'hidden'
+      }
+    })
+
+  } catch (error) {
+
+    toast.error(
+      error.messages?.[0] ||
+      __('Failed to send WhatsApp message')
+    )
+  }
 }
 
 function uploadOptions(openFileSelector) {
