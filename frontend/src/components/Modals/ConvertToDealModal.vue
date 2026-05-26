@@ -183,7 +183,16 @@ async function convertToDeal() {
       localStorage.setItem('firstDeal' + user, _deal)
     })
     capture('convert_lead_to_deal')
-    router.push({ name: 'Deal', params: { dealId: _deal } })
+    const activeTab = localStorage.getItem('lastDealTab') || 'activity'
+    if (isMobileView.value) {
+      window.location.href = `/crm/deals/${_deal}#${activeTab}`
+    } else {
+      router.push({ 
+        name: 'Deal', 
+        params: { dealId: _deal },
+        hash: `#${activeTab}`
+      })
+    }
   }
 }
 
