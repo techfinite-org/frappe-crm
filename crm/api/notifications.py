@@ -26,7 +26,10 @@ def get_notifications():
 				"to_user": notification.to_user,
 				"read": notification.read,
 				"hash": get_hash(notification),
-				"notification_text": notification.notification_text,
+				# Event notifications store their body in `message` (see crm/api/event.py),
+				# while Mention/etc. set `notification_text`. Fall back to `message` so that
+				# Event-type rows are displayed in the bell panel's "All" tab.
+				"notification_text": notification.notification_text or notification.message,
 				"notification_type_doctype": notification.notification_type_doctype,
 				"notification_type_doc": notification.notification_type_doc,
 				"reference_doctype": ("deal" if notification.reference_doctype == "CRM Deal" else "lead"),

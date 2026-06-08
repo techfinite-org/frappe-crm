@@ -93,6 +93,14 @@ onMounted(() => {
 })
 
 function getRoute(notification) {
+  // Event notifications (and any without a lead/deal reference) have no
+  // reference_name, so a Lead/Deal route can't be built — its required
+  // :leadId/:dealId param would be missing and RouterLink would throw during
+  // render, blanking the whole list. Send those to the calendar instead.
+  if (notification.type === 'Event' || !notification.reference_name) {
+    return { name: 'Calendar' }
+  }
+
   let params = {
     leadId: notification.reference_name,
   }
