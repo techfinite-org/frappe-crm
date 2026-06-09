@@ -54,8 +54,12 @@ def _process_event_notifications_by_interval(interval):
 
 	current_time = now_datetime()
 	current_user = frappe.session.user
+	# The scheduler runs as Administrator and must process events for ALL users.
+	# A logged-in user calling this via API stays scoped to their own events.
+	run_for_all_users = current_user == "Administrator"
+	user_clause = "" if run_for_all_users else "AND (e.owner = %(user)s OR ep.email = %(user)s)"
 	all_events_data = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			e.name as event_name,
 			e.subject,
@@ -72,19 +76,19 @@ def _process_event_notifications_by_interval(interval):
 			ep_all.participant_emails_csv,
 			CASE WHEN en.parent IS NULL THEN 0 ELSE 1 END as has_custom_notifications
 		FROM `tabEvent` e
-		LEFT JOIN `tabEvent Notifications` en ON e.name = en.parent AND en.interval = %s
-		LEFT JOIN `tabEvent Participants` ep ON e.name = ep.parent AND ep.email = %s
+		LEFT JOIN `tabEvent Notifications` en ON e.name = en.parent AND en.interval = %(interval)s
+		LEFT JOIN `tabEvent Participants` ep ON e.name = ep.parent AND ep.email = %(user)s
 		LEFT JOIN (
 			SELECT parent, GROUP_CONCAT(email) AS participant_emails_csv
 			FROM `tabEvent Participants`
 			GROUP BY parent
 		) AS ep_all ON ep_all.parent = e.name
-		WHERE (e.starts_on >= %s OR (%s >= e.starts_on AND %s < e.ends_on))
-		AND (e.owner = %s OR ep.email = %s)
+		WHERE (e.starts_on >= %(now)s OR (%(now)s >= e.starts_on AND %(now)s < e.ends_on))
+		{user_clause}
 		AND e.status != 'Cancelled'
 		ORDER BY e.starts_on, e.name
 	""",
-		(interval, current_user, current_time, current_time, current_time, current_user, current_user),
+		{"interval": interval, "user": current_user, "now": current_time},
 		as_dict=True,
 	)
 
@@ -368,5 +372,38 @@ def _format_time_remaining(before_value, interval):
 
 
 def _send_system_notification(notification):
-	"""Send system notification for an event"""
-	frappe.publish_realtime("event_notification", notification)
+	"""Send system notification - persists to CRM Notification + toast"""
+	users_to_notify = set()
+	owner = notification.get("owner")
+	# The owner (event creator) should always be notified, even if they are Administrator.
+	if owner:
+		users_to_notify.add(owner)
+	for participant in notification.get("event_participants") or []:
+		email = participant.get("email") if isinstance(participant, dict) else participant
+		if not email:
+			continue
+		user = frappe.db.get_value("User", {"email": email}, "name")
+		if user and user != "Administrator":
+			users_to_notify.add(user)
+	event_name = notification.get("event_name") or notification.get("name", "")
+	subject = notification.get("subject") or notification.get("title") or "Event Reminder"
+	for user in users_to_notify:
+		already = frappe.db.exists("CRM Notification", {
+			"to_user": user,
+			"type": "Event",
+			"notification_type_doc": event_name,
+		})
+		if not already:
+			frappe.get_doc({
+				"doctype": "CRM Notification",
+				"to_user": user,
+				"type": "Event",
+				"message": f"Reminder: {subject}",
+				"notification_type_doctype": "Event",
+				"notification_type_doc": event_name,
+				"read": 0,
+			}).insert(ignore_permissions=True)
+			frappe.db.commit()
+			frappe.publish_realtime("event_notification", notification, user=user)
+
+    
