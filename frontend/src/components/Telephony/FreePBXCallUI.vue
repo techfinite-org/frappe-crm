@@ -403,7 +403,7 @@ function setup() {
     url: 'crm.integrations.freepbx.handler.get_webrtc_credentials',
     auto: true,
     onSuccess(creds) {
-      _initJsSIP(creds)
+      if (creds) _initJsSIP(creds)
     },
     onError(err) {
       toast.error(err.messages?.[0] || __('Failed to load FreePBX credentials'))

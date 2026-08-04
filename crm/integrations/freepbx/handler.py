@@ -126,7 +126,7 @@ def handle_request(**kwargs):
 def get_webrtc_credentials():
 	"""Return SIP/WebRTC credentials for the logged-in agent to register in the browser."""
 	if not is_integration_enabled():
-		frappe.throw(_("FreePBX integration is not enabled"), title=_("Integration Not Enabled"))
+		return None
 
 	settings = get_freepbx_settings()
 	agent = frappe.get_value(
@@ -136,11 +136,9 @@ def get_webrtc_credentials():
 		as_dict=True,
 	)
 
+	# No agent record, or no SIP username configured — nothing to return, no error
 	if not agent or not agent.get("freepbx_sip_username"):
-		frappe.throw(
-			_("No FreePBX SIP credentials set in your Telephony Agent"),
-			title=_("Credentials Missing"),
-		)
+		return None
 
 	# Detect whether the request came over HTTPS or HTTP and pick the right WS scheme
 	is_https = (
@@ -155,13 +153,19 @@ def get_webrtc_credentials():
 		ws_scheme = "ws"
 		ws_port = settings.ws_port or 8088
 
-	# Must use get_doc + get_password() to decrypt the Password fieldtype
+	# Must use get_doc + get_password() to decrypt the Password fieldtype.
+	# raise_exception=False so a bad/rotated encryption_key (or missing
+	# credential) returns None quietly instead of throwing to the user.
 	agent_doc = frappe.get_doc("CRM Telephony Agent", {"user": frappe.session.user})
+	sip_password = agent_doc.get_password("freepbx_sip_password", raise_exception=False)
+
+	if not sip_password:
+		return None
 
 	return {
 		"sip_uri": f"sip:{agent.freepbx_sip_username}@{settings.host}",
 		"username": agent.freepbx_sip_username,
-		"password": agent_doc.get_password("freepbx_sip_password"),
+		"password": sip_password,
 		"extension": agent.freepbx_extension,
 		"ws_uri": f"{ws_scheme}://{settings.host}/ws",
 		"realm": settings.host,
